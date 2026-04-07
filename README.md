@@ -1,6 +1,6 @@
 # 🧠 Network Analysis of HCP Dataset
 
-This repository contains a network analysis of the Human Connectome Project (HCP) dataset**.
+This repository contains a network analysis of the Human Connectome Project (HCP) dataset.
 
 ---
 
