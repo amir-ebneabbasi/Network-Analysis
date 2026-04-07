@@ -46,26 +46,26 @@ Merge the two input files:
 
 - Compute correlation matrix (`rcorr`, `cor_auto`)
 - Visualize with `ggcorrplot`
-
+```r
     corr <- rcorr(as.matrix(data))
-
+```
 ---
 
 ### Network (Graphical LASSO)
-
+```r
     network <- qgraph::EBICglasso(cor_auto(data), n = nrow(data))
     qgraph(network, layout = "spring")
-
+```
 ---
 
 ### Bootstrapping
 
 - Edge confidence intervals  
 - Edge difference tests  
-
+```r
     network <- estimateNetwork(data, default = "EBICglasso")
     bootnet(network, nBoots = 10000)
-
+```
 ---
 
 ### Centrality
@@ -80,10 +80,11 @@ Merge the two input files:
 - Bootstrapped network (1000 samples)
 - Averaged network with thresholding
 
+```r
     fitBN <- hc(data)
     bootnet <- boot.strength(data, R = 1000, algorithm = "hc")
     avgnet <- averaged.network(bootnet, threshold = 0.85)
-
+```
 ---
 
 ## 📁 Outputs
