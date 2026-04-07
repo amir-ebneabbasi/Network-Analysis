@@ -1,0 +1,506 @@
+---
+title: "Network Analysis of HCP Dataset"
+---
+
+This file contains analysis of the HCP dataset.
+
+# Getting set up
+
+Importing libraries:
+
+```{r}
+library(tidyverse)
+library(ggcorrplot)
+library(Hmisc)
+library(reshape2)
+library(qgraph)
+library(igraph)
+library(networktools)
+library(bootnet)
+library(bnlearn)
+library(Rgraphviz)
+```
+
+Need to join the two `.csv` files to get all the data:
+
+```{r}
+unrestr <- read_csv('Unrestricted.csv', show_col_types = FALSE)
+restr <- read_csv('Restricted_new.csv', show_col_types = FALSE) 
+data_raw <- inner_join(restr, unrestr, by = 'Subject')
+```
+
+# Analysis: DSM scales
+
+Select columns of interest only and remove missing rows:
+
+```{r}
+data <- data_raw |>
+  filter(ZygosityGT != 'MZ' | is.na(ZygosityGT)) |>
+  select(
+    # # demographic
+    # SSAGA_Income,
+    SSAGA_Educ,
+    Age_in_Yrs,
+    Gender,
+    # 
+    # # physical health
+    BMI,
+    # 
+    # # sleep quality
+    # PSQI_Comp1, PSQI_Comp2, PSQI_Comp3,
+    # PSQI_Comp4, PSQI_Comp5, PSQI_Comp6, PSQI_Comp7,
+    # 
+    # # cognition
+    # PicSeq_AgeAdj, CardSort_AgeAdj, Flanker_AgeAdj,
+    # ReadEng_AgeAdj, PicVocab_AgeAdj, ProcSpeed_AgeAdj, ListSort_AgeAdj,
+    # 
+    # # emotion
+    AngAffect_Unadj, AngHostil_Unadj, AngAggr_Unadj,
+    FearAffect_Unadj, FearSomat_Unadj, Sadness_Unadj,
+    LifeSatisf_Unadj, MeanPurp_Unadj, PosAffect_Unadj,
+    Friendship_Unadj, Loneliness_Unadj, PercHostil_Unadj,
+    PercReject_Unadj, EmotSupp_Unadj, InstruSupp_Unadj,
+    PercStress_Unadj, SelfEff_Unadj,
+    # 
+    # # personality
+    # NEOFAC_A, NEOFAC_O, NEOFAC_N, NEOFAC_C, NEOFAC_E,
+    
+    # ASR
+    # ASR_Anxd_Pct,
+    # ASR_Witd_T,
+    # ASR_Soma_T,
+    # ASR_Thot_T,
+    # ASR_Attn_T,
+    # ASR_Aggr_T,
+    # ASR_Rule_T,
+    # ASR_Intr_T,
+
+    # family history
+    matches('FamHist_'),
+    # FamHist_Moth_PD, FamHist_Fath_PD,
+    # FamHist_Moth_Alz, FamHist_Fath_Alz,
+    
+    # DSM
+    # DSM_Adh_T, DSM_Depr_T, DSM_Anxi_T,
+    # DSM_Somp_T, DSM_Avoid_T, DSM_Antis_T
+  ) |>
+  
+  # remove unwanted strings from column names
+  rename_with(~ gsub("_Unadj|_AgeAdj|SSAGA_|_T", "", .x)) |>
+  
+  # mutate(
+  #   FamHist_PD = FamHist_Moth_PD + FamHist_Fath_PD,
+  #   FamHist_Alz = FamHist_Moth_Alz + FamHist_Fath_Alz
+
+  mutate(
+    FamHist_Scz = FamHist_Moth_Scz + FamHist_Fath_Scz,
+    FamHist_Dep = FamHist_Moth_Dep + FamHist_Fath_Dep,
+    FamHist_BP = FamHist_Moth_BP + FamHist_Fath_BP,
+    FamHist_Anx = FamHist_Moth_Anx + FamHist_Fath_Anx,
+    FamHist_DrgAlc = FamHist_Moth_DrgAlc + FamHist_Fath_DrgAlc,
+
+    # FamHist = FamHist_Moth_Dep + FamHist_Fath_Dep +
+    # FamHist_Moth_BP + FamHist_Fath_BP +
+    # FamHist_Moth_Anx + FamHist_Fath_Anx +
+    # FamHist_Moth_DrgAlc + FamHist_Fath_DrgAlc,
+  
+    Gender = ifelse(Gender == "F", 1, 0)
+    ) |>
+
+  select(-matches('FamHist_Moth|FamHist_Fath')) |>
+  
+  # # rename columns to desired names
+  # rename(
+  #   FH_Depression = FamHist_Dep,
+  #   FH_Bipolar = FamHist_BP,
+  #   FH_Anxiety = FamHist_Anx,
+  #   FH_DrugAlcoholic = FamHist_DrgAlc,
+    
+  #   Education = Educ,
+  # 
+  #   SleepQual = PSQI_Comp1, SleepLaten = PSQI_Comp2, HabitSleep = PSQI_Comp3,
+  #   SleepDur = PSQI_Comp4, SleepDistrb = PSQI_Comp5, SleepMed = PSQI_Comp6,
+  #   DaytimeDys = PSQI_Comp7,
+  # 
+  #   EpisodicMem = PicSeq, CogFlex = CardSort,
+  #   Inhibition = Flanker, ReadDecod = ReadEng,
+  #   VocabComp = PicVocab, WorkingMem = ListSort,
+  #   
+  #   Agreeableness = NEOFAC_A, Openness = NEOFAC_O,
+  #   Conscientiousness = NEOFAC_C, Neuroticism = NEOFAC_N,
+  #   Extraversion = NEOFAC_E
+  
+  # 'Attention deficit/hyperactivity (DSM)' = DSM_Adh, 'Depression (DSM)' = DSM_Depr,
+  # 'Anxiety (DSM)' = DSM_Anxi, 'Somatic (DSM)' = DSM_Somp,
+  # 'Avoidant personality (DSM)' = DSM_Avoid, 'Antisocial personality (DSM)' = DSM_Antis
+  na.omit()
+```
+
+```{r}
+labels_full = c(
+  'Income' = 'Income', 'Education' = 'Education',
+  
+  'BMI' = 'BMI',
+  
+  'SleepQual' = 'Subjective sleep quality', 'SleepLaten' = 'Sleep latency',
+  'HabitSleep' = 'Habitual sleep', 'SleepDur' = 'Sleep duration',
+  'SleepDistrb' = 'Sleep disturbance', 'SleepMed' = 'Use of sleep medications',
+  'DaytimeDys' = 'Daytime dysfunction',
+
+  'EpisodicMem' = 'Episodic memory', 'CogFlex' = 'Cognitive flexibility',
+  'Inhibition' = 'Inhibition', 'ReadDecod' = 'Reading decoding',
+  'VocabComp' = 'Vocabulary comprehension', 'ProcSpeed' = 'Processing speed',
+  'WorkingMem' = 'Working memory',
+
+  'AngAffect' = 'Anger affect', 'AngHostil' = 'Hostility', 'AngAggr' = 'Aggression',
+  'FearAffect' = 'Fear affect', 'FearSomat' = 'Somatic arousal', 'Sadness' = 'Sadness',
+  'LifeSatisf' = 'Life satisfaction', 'MeanPurp' = 'Meaning and purpose', 'PosAffect' = 'Positive affect',
+  'Friendship' = 'Friendship', 'Loneliness' = 'Loneliness', 'PercHostil' = 'Perceptions of hostility',
+  'PercReject' = 'Perceptions of rejection', 'PercStress' = 'Perceived stress', 'EmotSupp' = 'Emotional support',
+  'InstruSupp' = 'Instrumental support', 'SelfEff' = 'Self efficacy',
+  
+  'Agreeableness' = 'Agreeableness', 'Openness' = 'Openness',
+  'Neuroticism' = 'Neuroticism', 'Conscientiousness' = 'Conscientiousness',
+  'Extraversion' = 'Extraversion',
+  
+  'DSM_Adh' = 'Attention deficit/hyperactivity (DSM)', 'DSM_Depr' = 'Depression (DSM)',
+  'DSM_Anxi' = 'Anxiety (DSM)', 'DSM_Somp' = 'Somatic (DSM)',
+  'DSM_Avoid' = 'Avoidant personality (DSM) ', 'DSM_Antis' = 'Antisocial personality (DSM)'
+)
+```
+
+## Correlation matrix plot
+
+```{r}
+corr <- rcorr(as.matrix(data))
+```
+
+```{r}
+ggcorrplot(
+  corr = corr$r,
+  p.mat = corr$P,
+  lab = TRUE,
+  type = 'upper',
+  # show.diag = FALSE,
+  colors = c('blue3', 'white', 'red3'),
+  insig = "blank",
+  outline.color = "white",
+  lab_size = 3) +
+  theme(
+    axis.text.x = element_text(size=8, face = 'bold', family = 'Courier'),
+    axis.text.y = element_text(size=8, face = 'bold', family = 'Courier')
+    ) +
+  guides(fill=guide_colorbar(ticks.colour = "NA"))
+```
+
+## Correlation line plot: DSM with selected columns
+
+Melting the correlation matrix and detecting columns that contain the string `"DSM"` in `Var1` column and those that do not contain `"DSM"` in `Var2` column:
+
+```{r}
+corr.r <-  cor_auto(data) |> melt() |>  # using cor_auto() to treat ordinals differently
+  filter(str_detect(Var1, 'FH')) |>
+  filter(!str_detect(Var2, 'FH'))
+
+corr.p <-  corr$P |> melt() |>
+  filter(str_detect(Var1, 'FH')) |>
+  filter(!str_detect(Var2, 'FH'))
+
+corr_long <- inner_join(corr.r, corr.p, by = c('Var1', 'Var2'))
+colnames(corr_long) <- c('Var1', 'Var2', 'r', 'p')
+
+corr_long$r[corr_long$p > 0.05] <- NA
+```
+
+```{r}
+mycolors <- c(
+  rep('green4', 2),
+  rep('purple3', 1),
+  rep('black', 7),
+  rep('red3', 7),
+  rep('dodgerblue3', 17),
+  rep('orange3', 5)
+  )
+```
+
+```{r, fig.height=3, fig.width=8}
+ggplot(corr_long, aes(color = Var1)) +
+geom_line(
+  aes(x = Var2, y = r, group = Var1),
+  alpha = 0.5, size = 1.4
+  ) +
+geom_point(
+  aes(x = Var2, y = r),
+  alpha = 0.6, size = 4
+  ) +
+geom_hline(
+  yintercept = 0, linetype = 'dashed', size = 0.35
+  ) +
+
+theme_classic() +
+theme(
+  axis.text.y = element_text(size = 16),
+  axis.text.x = element_text(size = 14, angle = 40, vjust = 0.7, hjust = 0.7),
+  axis.title.y = element_text(size = 14, margin = margin(r = 14)),
+  axis.title.x = element_blank(),
+  
+  axis.ticks.length=unit(12, "pt"),
+  
+  legend.text = element_text(size = 14),
+  legend.title.align = 0.5,
+  legend.title = element_text(size = 14, face = 'bold'),
+  # panel.grid.major.x = element_line(color = 1, size = 0.025)
+  
+  # options for facet_grid
+  # panel.spacing = unit(1.5, "lines"),
+  # strip.text.y = element_blank(),
+  # strip.background = element_rect(color = NA)
+  ) +
+  
+scale_y_continuous(breaks=c(-0.5, -0.25, 0, 0.25, 0.5)) +
+# scale_x_discrete(labels = labels_full) +
+scale_color_brewer(palette="Set1") +
+
+ylab('Correlation') +
+ylim(-0.5, 0.5) +
+labs(color = 'Family History')
+
+ggsave("Aug_FamHist_Emotion_line_corr.pdf", limitsize = FALSE)
+```
+
+## Network Analysis
+
+### Goldbricker approach
+
+```{r}
+gb <- goldbricker(data, threshold=0.5)
+gb
+```
+
+```{r}
+reduced <- net_reduce(data=data, badpairs=gb)
+```
+
+The code in this part was initially adopted from the supplementary material [here](https://doi.org/10.1017/s0033291716003287).
+
+### Graphical Lasso
+
+```{r}
+network <- qgraph::EBICglasso(cor_auto(data), n = nrow(data))
+```
+
+```{r}
+pdf(file = 'glasso.pdf', height = 8)
+glasso <- qgraph(network,
+       labels = colnames(data),
+       
+       layout = "spring",
+       repulsion = 0.9,
+       layoutScale = c(1, 1),
+       layoutOffset = c(0, 0),
+       
+      #  groups = list("Family History" = (ncol(data)-3):ncol(data)),
+       
+       vsize = 7,
+       vsize2 = 3,
+       label.scale = F,
+       palette = "pastel",
+       # shape = 'rectangle',
+       # label.color = 'black',
+       label.font = 1,
+       label.cex = 1,
+       # borders = F,
+       edge.width = 1.1,
+       legend.cex = 0.5
+       )
+
+# qgraph(glasso, filename = 'glasso.pdf')
+dev.off()
+```
+
+### Boostrapped graphical LASSO network
+
+Edge weight accuracy (this takes about 5 min):
+
+```{r}
+set.seed(5)
+network <- bootnet::estimateNetwork(data, default = "EBICglasso", corMethod = "cor_auto")
+network_bootstrapped <- bootnet(network, nBoots = 10000, nCores = 10)
+```
+
+#### Plot edge differences (y-axis)
+
+The red line indicates the sample values and the gray area the bootstrapped CIs. Each horizontal line represents one edge of the network, ordered from the edge with the highest edge-weight to the edge with the lowest edge-weight. We see which edge weights differ significantly from each other.
+
+```{r}
+pdf(file = 'Aug_FamHist_Emotion_edge_diff.pdf', height = 15)
+plot(network_bootstrapped, labels = TRUE, order = "sample")
+dev.off()
+```
+
+Bootstrapped difference tests between edge-weights that were non-zero. In the estimated network (first plot) and node strength of the symptoms (second plot):
+
+```{r}
+plot(network_bootstrapped, "edge", plot = "difference", onlyNonZero = TRUE, order = "sample")
+plot(network_bootstrapped, "strength")
+```
+
+Gray boxes indicate nodes or edges that do not differ significantly from one another and black boxes represent nodes or edges that do differ significantly from one another (Note: white boxes in the second plot show the value of node strength).
+
+### Centrality measures
+
+```{r}
+pdf(file = 'Aug_FamHist_Emotion_cent.pdf')
+centralityPlot(network,
+               # labels = labels_full,
+               scale = "relative",
+               include = c("Betweenness", "Closeness", "Strength"),
+               orderBy = "Strength"
+               )
+dev.off()
+```
+
+```{r}
+cmeasures <- centrality(network)
+cDF <- data.frame(degree = cmeasures$OutDegree,
+                  closeness = cmeasures$Closeness,
+                  betweenness = cmeasures$Betweenness) |> round(4)
+```
+
+#### Centrality stability
+
+Average correlations between centrality indices of networks sampled with persons dropped and the original sample. Lines indicate the means and areas indicate the range from the 2.5th quantile to the 97.5th quantile:
+
+```{r}
+glassoBoot2 <- bootnet(network, nBoots = 2000, type = "person", nCores = 6,
+                       statistics = c("strength", "closeness", "betweenness"))
+```
+
+
+```{r}
+pdf(file = 'Aug_FamHist_Emotion_cent_stability.pdf')
+plot(glassoBoot2, c("strength", "closeness", "betweenness"))
+corStability(glassoBoot2)
+dev.off()
+```
+
+### Bayesian network
+
+Fit a first Bayesian network, based on 50 random re-starts and 100 perturbations for each re-start:
+
+```{r}
+set.seed(5)
+fitBN1 <- hc(data, restart = 50, perturb = 100)  ## hc gives directed graph 
+fitBN1
+
+bnlearn::score(fitBN1, data = data)          ## global network score 
+astr <- arc.strength(fitBN1, data, "bic-g")  ## connection strength 
+astr[order(astr[,3]), ]  ## sorted edge strength from strongest to weakest 
+
+strength.plot(fitBN1, astr, shape = "ellipse")
+```
+
+Now we stabilize the network across multiple samples through bootstrapping -> Learn 1000 network structures (takes ~15 min, we keep the number of restarts and perturbations considerably low) 
+
+```{r}
+set.seed(5)
+bootnet <- boot.strength(data, R = 1000, algorithm = "hc", algorithm.args = list(restart = 20, perturb = 20), debug = T)
+# bootnet <- boot.strength(data, R = 2000, algorithm = "pc.stable", debug = T)
+# bootnet <- boot.strength(data, R = 2000, algorithm = "tabu", debug = T)
+# bootnet <- boot.strength(data, R = 2000, algorithm = "mmhc", debug = T)
+```
+
+**Strength:** Connection strength, e.g. 0.86 means that this connection appears in 86% of the fitted networks. 
+**Direction:** Probability of the direction, e.g. 0.57 means that in 57% of the fitted networks the connection goes in the direction depicted in the graph.
+
+```{r}
+## filter the ones with a strength larger than 0.85 and a direction probability > 0.5 
+boottab <- bootnet[bootnet$strength > 0.85 & bootnet$direction > 0.5, ] 
+
+## net1: build the average network using a 0.85 threshold (Sachs et al., 2005, Science)
+avgnet1 <- averaged.network(bootnet, threshold = 0.85)
+# avgnet1
+bnlearn::score(avgnet1, data = data)
+astr1 <- arc.strength(avgnet1, data, "bic-cg")   ## compute edge strengths 
+```
+
+```{r}
+strg_plot <- strength.plot(avgnet1, astr1,
+                           shape = "ellipse",
+                           # highlight = list(nodes = c('DSM_Depr', 'DSM_Anxi', 'DSM_Somp',
+                           #                          'DSM_Avoid', 'DSM_Adh', 'DSM_Antis'),
+                           #                  col = "tomato", fill = "orange1")
+                           )
+
+png(file = 'Aug_FamHistTot_Emotion_DAG_hc_seed5_bic-cg.png', width = 7, height = 6, units = 'in', res = 300)
+graph::nodeRenderInfo(strg_plot) <- list(fontsize = 14)
+graph::edgeRenderInfo(strg_plot) <- list(col="darkblue", lwd = graph::edgeRenderInfo(strg_plot)$lwd * 1.0)
+Rgraphviz::renderGraph(strg_plot)
+dev.off()
+```
+
+```{r}
+qgraph(strg_plot,
+       labels = nodes(avgnet1),
+       # layout = 'spring',
+       # groups = list(DSM = 40:45,
+       #               Demographic = 1:2,
+       #               Physical = 3,
+       #               Sleep = 4:10,
+       #               Cognition = 11:17,
+       #               Emotion = 18:34,
+       #               Personality = 35:39
+       #               ),
+       vsize = 8,
+       vsize2 = 2.3,
+       label.scale = T,
+       palette = "pastel",
+       shape = 'ellipse',
+       # label.color = 'black',
+       label.font = 1,
+       label.cex = 1.5,
+       borders = F,
+       edge.width = 1.5,
+       esize = 5,
+       asize = 1.5,
+       # curveAll = T,
+       edge.color = 'black'
+       )
+```
+
+```{r}
+## net2: use the optimal cutpoint according to Scurati & Nagarajan (2013) Artificial Intelligence in Medicine
+avgnet2 <- averaged.network(bootnet)
+avgnet2
+bnlearn::score(avgnet2, data = data)
+thresh <- avgnet2$learning$args[[1]]
+thresh                                  ## optimal significance threshold
+astr2 <- arc.strength(avgnet2, data, "bic-g")   ## compute edge strengths
+astr2
+
+## net3: use net2 threshold, edge strengths are determined by direction probability
+boottab <- bootnet[bootnet$strength > thresh & bootnet$direction > 0.5, ]  ## edges in net2
+boottab
+astr3 <- boottab   ## table with direction probabilities
+astr3$strength <- astr3$direction  ## use the direction probabilities for edge width
+
+## net4: use net1 threshold, edge strengths are determined by direction probability
+boottab <- bootnet[bootnet$strength > 0.85 & bootnet$direction > 0.5, ]  ## edges in net2
+boottab
+astr4 <- boottab   ## table with direction probabilities
+astr4$strength <- astr4$direction  ## use the direction probabilities for edge width
+```
+
+```{r}
+strength.plot(avgnet1, astr4,
+              shape = "ellipse",
+              # highlight = list(nodes=c('DSM_Depr', 'DSM_Anxi', 'DSM_Somp',
+              #                          'DSM_Avoid', 'DSM_Adh', 'DSM_Antis'),
+                               # col = "tomato", fill = "orange" )
+              )
+graph::nodeRenderInfo(strg_plot) <- list(fontsize = 20)
+graph::edgeRenderInfo(strg_plot) <- list(col="blue4", lwd = graph::edgeRenderInfo(strg_plot)$lwd * 0.5)
+Rgraphviz::renderGraph(strg_plot)
+```
+
+Thick arrows indicate high directional probabilities, thin arrows low directional probabilities.
