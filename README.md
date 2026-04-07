@@ -7,7 +7,7 @@ This repository contains a network analysis of the Human Connectome Project (HCP
 ## ⚙️ Setup
 
 Install required R packages:
-
+```r
     library(tidyverse)
     library(ggcorrplot)
     library(Hmisc)
@@ -18,17 +18,17 @@ Install required R packages:
     library(bootnet)
     library(bnlearn)
     library(Rgraphviz)
-
+```
 ---
 
 ## 📂 Data
 
-Merge the two input files:
-
+Merge the two input files of HCP:
+```r
     unrestr <- read_csv('Unrestricted.csv', show_col_types = FALSE)
     restr <- read_csv('Restricted_new.csv', show_col_types = FALSE) 
     data_raw <- inner_join(restr, unrestr, by = 'Subject')
-
+```
 ---
 
 ## 🧹 Preprocessing
@@ -44,7 +44,7 @@ Merge the two input files:
 
 ### Correlation
 
-- Compute correlation matrix (`rcorr`, `cor_auto`)
+- Compute correlation matrix 
 - Visualize with `ggcorrplot`
 ```r
     corr <- rcorr(as.matrix(data))
@@ -63,15 +63,21 @@ Merge the two input files:
 - Edge confidence intervals  
 - Edge difference tests  
 ```r
-    network <- estimateNetwork(data, default = "EBICglasso")
-    bootnet(network, nBoots = 10000)
+    network <- bootnet::estimateNetwork(data, default = "EBICglasso", corMethod = "cor_auto")
+    network_bootstrapped <- bootnet(network, nBoots = 10000, nCores = 10)
 ```
 ---
 
 ### Centrality
 
-- Strength, closeness, betweenness  
-
+- Strength, closeness, betweenness
+- centrality stability
+```r
+centralityPlot(network,
+               scale = "relative")
+glassoBoot <- bootnet(network, nBoots = 2000, type = "person", nCores = 6,
+                       statistics = c("strength", "closeness", "betweenness"))  
+```
 ---
 
 ## 🔗 Bayesian Network
@@ -79,7 +85,6 @@ Merge the two input files:
 - Structure learning using hill-climbing (`hc`)
 - Bootstrapped network (1000 samples)
 - Averaged network with thresholding
-
 ```r
     fitBN <- hc(data)
     bootnet <- boot.strength(data, R = 1000, algorithm = "hc")
