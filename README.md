@@ -80,7 +80,7 @@ glassoBoot <- bootnet(network, nBoots = 2000, type = "person", nCores = 6,
 ```
 ---
 
-## 🔗 Bayesian Network
+### Bayesian Network
 
 - Structure learning using hill-climbing (`hc`)
 - Bootstrapped network (1000 samples)
